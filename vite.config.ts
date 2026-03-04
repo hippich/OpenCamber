@@ -5,6 +5,7 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
+  base: '/OpenCamber/',
   test: {
     environment: 'node',
     globals: true,
