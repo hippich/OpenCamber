@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAlignmentStore } from '../store/alignmentStore';
-import { useInternalSensor } from '../hooks/useInternalSensor';
 import { useToast } from '../hooks/useToast';
 import { LiveAngleDisplay } from '../components/LiveAngleDisplay';
 import { PlacementDiagram } from '../components/PlacementDiagram';
@@ -61,7 +60,6 @@ export function Measure() {
     resetStabilization,
   } = useAlignmentStore();
   const { addToast } = useToast();
-  useInternalSensor();
 
   // ── per-wheel camber / toe state ──────────────────────────────────────────
   const [selectedWheel, setSelectedWheel] = useState<WheelKey>('RL');

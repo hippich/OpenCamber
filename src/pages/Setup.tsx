@@ -1,13 +1,13 @@
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useAlignmentStore } from '../store/alignmentStore';
-import { useInternalSensor } from '../hooks/useInternalSensor';
+import { useSensorController } from '../hooks/useSensorController';
 import { LiveAngleDisplay } from '../components/LiveAngleDisplay';
 
 export function Setup() {
   const navigate = useNavigate();
   const { sensorMode, setSensorMode, sensorConnected, sensorData, sensorError } = useAlignmentStore();
-  const { requestIOSPermission, isIOSDevice } = useInternalSensor();
+  const { requestIOSPermission, isIOSDevice } = useSensorController();
   const [permissionLoading, setPermissionLoading] = useState(false);
   const [sensorSectionOpen, setSensorSectionOpen] = useState(false);
 
