@@ -7,8 +7,10 @@ import { Measure } from './pages/Measure';
 import { Results } from './pages/Results';
 
 function App() {
+  const baseUrl = (import.meta as ImportMeta & { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/';
+
   return (
-    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <Router basename={baseUrl} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ToastProvider>
         <Routes>
           <Route path="/" element={<Home />} />
