@@ -3,6 +3,7 @@ interface LiveAngleDisplayProps {
   pitch: number;
   roll: number;
   yaw: number;
+  camber?: number;
   isStable: boolean;
   stabilityProgress: number;
   showLabel?: string;
@@ -12,12 +13,13 @@ export function LiveAngleDisplay({
   pitch,
   roll,
   yaw,
+  camber,
   isStable,
   stabilityProgress,
   showLabel = 'Pitch',
 }: LiveAngleDisplayProps) {
   const displayValue =
-    showLabel.includes('Camber') || showLabel.includes('Caster') ? roll
+    showLabel.includes('Camber') || showLabel.includes('Caster') ? (camber ?? roll)
     : showLabel.includes('Toe') ? yaw
     : pitch;
 
@@ -39,6 +41,7 @@ export function LiveAngleDisplay({
         {/* Raw values */}
         <div className="text-right text-xs text-neutral-500 space-y-0.5 shrink-0">
           <div>R {roll.toFixed(1)}°</div>
+          {camber != null && <div>C {camber.toFixed(1)}°</div>}
           <div>Y {yaw.toFixed(1)}°</div>
         </div>
 

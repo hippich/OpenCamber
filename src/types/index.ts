@@ -6,6 +6,10 @@ export interface SensorData {
   pitch: number;
   roll: number;
   yaw: number;
+  camber?: number; // edge-mounted camber from gravity projection (deg)
+  gravityX?: number; // m/s^2 (accelerationIncludingGravity.x)
+  gravityY?: number; // m/s^2 (accelerationIncludingGravity.y)
+  gravityZ?: number; // m/s^2 (accelerationIncludingGravity.z)
   quaternions?: [number, number, number, number]; // [x, y, z, w]
   timestamp: number;
   isStable: boolean;

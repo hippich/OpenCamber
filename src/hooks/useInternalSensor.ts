@@ -7,25 +7,15 @@ interface FilteredAngles {
   pitch: number;
   roll: number;
   yaw: number;
-}
-
-function normalizeAngle360(angle: number): number {
-  return ((angle % 360) + 360) % 360;
-}
-
-function normalizeAngle180(angle: number): number {
-  let normalized = angle % 360;
-  if (normalized > 180) normalized -= 360;
-  if (normalized < -180) normalized += 360;
-  return normalized;
-}
-
-function lowPassCircular(rawYaw: number, previousYaw: number, alpha = 0.2): number {
-  const delta = normalizeAngle180(rawYaw - previousYaw);
-  return normalizeAngle360(previousYaw + alpha * delta);
+  camber: number;
+  gravityX: number;
+  gravityY: number;
+  gravityZ: number;
 }
 
 let globalPermissionGranted = false;
+const CAMBER_FILTER_ALPHA = 0.08;
+const CAMBER_MOVING_AVERAGE_WINDOW = 12;
 
 /**
  * Hook to access phone's built-in accelerometer/gyroscope via DeviceOrientation API
@@ -35,26 +25,25 @@ let globalPermissionGranted = false;
 export function useInternalSensor(): { requestIOSPermission: () => Promise<boolean>; isIOSDevice: boolean } {
   const { setSensorConnected, setSensorError, updateSensorData, stabilizationResetCounter } = useAlignmentStore();
 
-  const filteredAngles = useRef<FilteredAngles>({ pitch: 0, roll: 0, yaw: 0 });
+  const filteredAngles = useRef<FilteredAngles>({
+    pitch: 0,
+    roll: 0,
+    yaw: 0,
+    camber: 0,
+    gravityX: 0,
+    gravityY: 0,
+    gravityZ: 0,
+  });
   const angleHistory = useRef<number[]>([]);
+  const camberSmoothingHistory = useRef<number[]>([]);
   const isActiveRef = useRef(true);
   const listenerAttachedRef = useRef(false);
   const hasFirstReadingRef = useRef(false);
   const freshSampleRef = useRef(false);
 
   // Detect iOS 13+ which requires requestPermission()
-  // Check user agent first (more reliable), then verify requestPermission exists
-  const isIOSDevice = (() => {
-    if (typeof window === 'undefined') return false;
-    
-    // Check user agent for iOS indicators
-    const ua = navigator.userAgent.toLowerCase();
-    const isIOSUA = /iphone|ipad|ipod/.test(ua);
-    
-    // Only trust requestPermission if user agent indicates iOS
-    // This prevents false positives on desktop browsers
-    return isIOSUA && 'DeviceOrientationEvent' in window && typeof (window as any).DeviceOrientationEvent?.requestPermission === 'function';
-  })();
+  // Check in a safe way to avoid ReferenceError on non-mobile/non-supporting browsers
+  const isIOSDevice = typeof window !== 'undefined' && 'DeviceOrientationEvent' in window && typeof (window as any).DeviceOrientationEvent?.requestPermission === 'function';
 
   // Event handler: only updates filtered angles at full sensor rate.
   // History accumulation and store updates are handled by the fixed-rate ticker
@@ -65,33 +54,56 @@ export function useInternalSensor(): { requestIOSPermission: () => Promise<boole
 
       const rawPitch = event.gamma ?? 0;
       const rawRoll = (event.beta ?? 90) - 90;
-      const anyEvent = event as DeviceOrientationEvent & { webkitCompassHeading?: number };
-      const heading =
-        typeof anyEvent.webkitCompassHeading === 'number'
-          ? anyEvent.webkitCompassHeading
-          : event.alpha ?? 0;
-      const rawYaw = normalizeAngle360(heading);
-      const absolute = event.absolute ?? false;
-
-      console.log('Raw sensor data:', { rawPitch, rawRoll, rawYaw, absolute });
-
-      if (!hasFirstReadingRef.current) {
-        filteredAngles.current = {
-          pitch: rawPitch,
-          roll: rawRoll,
-          yaw: rawYaw,
-        };
-        hasFirstReadingRef.current = true;
-        freshSampleRef.current = true;
-        return;
-      }
+      const rawYaw = event.alpha ?? 0;
 
       filteredAngles.current = {
+        ...filteredAngles.current,
         pitch: lowPassFilter(rawPitch, filteredAngles.current.pitch),
         roll: lowPassFilter(rawRoll, filteredAngles.current.roll),
-        yaw: lowPassCircular(rawYaw, filteredAngles.current.yaw),
+        yaw: lowPassFilter(rawYaw, filteredAngles.current.yaw),
       };
+      hasFirstReadingRef.current = true;
       freshSampleRef.current = true;  // signal ticker that a valid sample arrived
+  }, []);
+
+  // Motion handler: compute edge-mounted camber from gravity vector.
+  // Phone mounting for camber: edge against wheel, charging port down,
+  // screen toward rear of car. In this pose, camber is represented by
+  // gravity projection in phone X/Y plane (rotation around phone Z).
+  const handleDeviceMotion = useCallback((event: DeviceMotionEvent) => {
+    if (!isActiveRef.current) return;
+    if (!globalPermissionGranted) return;
+
+    const accel = event.accelerationIncludingGravity;
+    if (!accel) return;
+
+    const gx = accel.x ?? filteredAngles.current.gravityX;
+    const gy = accel.y ?? filteredAngles.current.gravityY;
+    const gz = accel.z ?? filteredAngles.current.gravityZ;
+
+    const rawCamber = (Math.atan2(gx, gy) * 180) / Math.PI;
+    const lowPassedCamber =
+      (1 - CAMBER_FILTER_ALPHA) * filteredAngles.current.camber + CAMBER_FILTER_ALPHA * rawCamber;
+
+    camberSmoothingHistory.current.push(lowPassedCamber);
+    if (camberSmoothingHistory.current.length > CAMBER_MOVING_AVERAGE_WINDOW) {
+      camberSmoothingHistory.current.shift();
+    }
+
+    const movingAverageCamber =
+      camberSmoothingHistory.current.reduce((sum, value) => sum + value, 0) /
+      camberSmoothingHistory.current.length;
+
+    filteredAngles.current = {
+      ...filteredAngles.current,
+      camber: movingAverageCamber,
+      gravityX: lowPassFilter(gx, filteredAngles.current.gravityX),
+      gravityY: lowPassFilter(gy, filteredAngles.current.gravityY),
+      gravityZ: lowPassFilter(gz, filteredAngles.current.gravityZ),
+    };
+
+    hasFirstReadingRef.current = true;
+    freshSampleRef.current = true;
   }, []);
 
   // Fixed-rate ticker: fills history and drives store updates at 20 Hz.
@@ -107,9 +119,15 @@ export function useInternalSensor(): { requestIOSPermission: () => Promise<boole
       if (!freshSampleRef.current) return;
       freshSampleRef.current = false;
 
-      const { pitch, roll, yaw } = filteredAngles.current;
+      const { pitch, roll, yaw, camber, gravityX, gravityY, gravityZ } = filteredAngles.current;
 
-      angleHistory.current.push(roll);
+      // Posture-aware stabilization source:
+      // - Horizontal phone (toe capture): use roll (flatness) to avoid noisy camber projection
+      // - Vertical phone (camber/caster): use gravity-derived camber
+      const isHorizontalPose = Math.abs(roll + 90) <= 20 && Math.abs(pitch) <= 20;
+      const stabilitySample = isHorizontalPose ? roll : camber;
+
+      angleHistory.current.push(stabilitySample);
       if (angleHistory.current.length > 100) angleHistory.current.shift();
 
       const stable = isStable(angleHistory.current);
@@ -119,6 +137,10 @@ export function useInternalSensor(): { requestIOSPermission: () => Promise<boole
         pitch: parseFloat(pitch.toFixed(2)),
         roll: parseFloat(roll.toFixed(2)),
         yaw: parseFloat(yaw.toFixed(2)),
+        camber: parseFloat(camber.toFixed(2)),
+        gravityX: parseFloat(gravityX.toFixed(3)),
+        gravityY: parseFloat(gravityY.toFixed(3)),
+        gravityZ: parseFloat(gravityZ.toFixed(3)),
         timestamp: Date.now(),
         isStable: stable,
         stabilityProgress,
@@ -131,11 +153,12 @@ export function useInternalSensor(): { requestIOSPermission: () => Promise<boole
   const attachListener = useCallback(() => {
     if (!listenerAttachedRef.current && globalPermissionGranted) {
       window.addEventListener('deviceorientation', handleDeviceOrientation);
+      window.addEventListener('devicemotion', handleDeviceMotion);
       listenerAttachedRef.current = true;
       setSensorConnected(true);
       setSensorError(null);
     }
-  }, [handleDeviceOrientation, setSensorConnected, setSensorError]);
+  }, [handleDeviceOrientation, handleDeviceMotion, setSensorConnected, setSensorError]);
 
   const requestIOSPermission = useCallback(async (): Promise<boolean> => {
     if (!isIOSDevice) {
@@ -171,6 +194,7 @@ export function useInternalSensor(): { requestIOSPermission: () => Promise<boole
       
       if (!listenerAttachedRef.current) {
         window.addEventListener('deviceorientation', handleDeviceOrientation);
+        window.addEventListener('devicemotion', handleDeviceMotion);
         listenerAttachedRef.current = true;
         setSensorConnected(true);
         setSensorError(null);
@@ -181,16 +205,18 @@ export function useInternalSensor(): { requestIOSPermission: () => Promise<boole
       isActiveRef.current = false;
       if (listenerAttachedRef.current) {
         window.removeEventListener('deviceorientation', handleDeviceOrientation);
+        window.removeEventListener('devicemotion', handleDeviceMotion);
         listenerAttachedRef.current = false;
         setSensorConnected(false);
         hasFirstReadingRef.current = false;
       }
     };
-  }, [isIOSDevice, handleDeviceOrientation, setSensorConnected, setSensorError]);
+  }, [isIOSDevice, handleDeviceOrientation, handleDeviceMotion, setSensorConnected, setSensorError]);
 
   // Reset angle history when instructed by store signal
   useEffect(() => {
     angleHistory.current = [];
+    camberSmoothingHistory.current = [];
   }, [stabilizationResetCounter]);
 
   return { requestIOSPermission, isIOSDevice };

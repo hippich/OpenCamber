@@ -18,9 +18,9 @@ const WHEELS: WheelKey[] = ['FL', 'FR', 'RL', 'RR'];
  * Returns a warning string if the phone orientation looks wrong for the given
  * measurement position, or null if all guards pass.
  *
- * VERTICAL (camber / caster): phone upright, back against wheel, port down.
- *   - pitch = gamma: phone lateral sway.  Guard: |pitch| > 20
- *   - roll  = beta-90: 0 when upright.    Guard: |roll| > 45 (near horizontal)
+ * VERTICAL (camber / caster): phone upright, edge against wheel, port down.
+ *   - gravityY should stay high magnitude (upright phone)
+ *   - gravityZ should stay near 0 (avoid fore/aft pitch contamination)
  *
  * HORIZONTAL (toe): phone flat, back to ground, screen up.
  *   - roll = beta-90 ≈ -90 when flat.     Deviation from flat = roll+90 = beta.
@@ -30,11 +30,18 @@ function guardWarning(
   position: 'VERTICAL' | 'HORIZONTAL' | null,
   pitch: number,
   roll: number,
+  gravityY?: number,
+  gravityZ?: number,
 ): string | null {
   if (!position) return null;
   if (position === 'VERTICAL') {
-    if (Math.abs(pitch) > 20) return `Phone tilted sideways ${pitch.toFixed(0)}° — straighten it (charging port straight down)`;
-    if (Math.abs(roll) > 45) return `Phone nearly horizontal (roll ${roll.toFixed(0)}°) — hold it UPRIGHT against the wheel`;
+    if (gravityY != null && gravityZ != null) {
+      if (Math.abs(gravityY) < 6) return 'Phone not upright enough — keep charging port down and phone vertical';
+      if (Math.abs(gravityZ) > 3) return 'Phone pitched fore/aft too much — keep edge square to the wheel face';
+    } else {
+      if (Math.abs(pitch) > 20) return `Phone tilted sideways ${pitch.toFixed(0)}° — straighten it (charging port straight down)`;
+      if (Math.abs(roll) > 45) return `Phone nearly horizontal (roll ${roll.toFixed(0)}°) — hold it UPRIGHT against the wheel`;
+    }
   } else {
     // HORIZONTAL: deviation from flat = roll + 90 (= beta)
     const flatDeviation = roll + 90;
@@ -104,12 +111,19 @@ export function Measure() {
   useEffect(() => { resetStabilization(); }, [casterSteering, casterActiveWheel, resetStabilization]);
 
   // ── guard / record readiness ──────────────────────────────────────────────
-  const warning = guardWarning(selectedPosition, sensorData?.pitch ?? 0, sensorData?.roll ?? 0);
-  const guardOk = warning === null;
+  const verticalCamber = sensorData?.camber ?? sensorData?.roll ?? 0;
+  const warningEdgeAware = guardWarning(
+    selectedPosition,
+    sensorData?.pitch ?? 0,
+    sensorData?.roll ?? 0,
+    sensorData?.gravityY,
+    sensorData?.gravityZ,
+  );
+  const guardOk = warningEdgeAware === null;
   const canRecord = (sensorData?.isStable ?? false) && guardOk;
 
   // caster uses VERTICAL guard
-  const casterWarning = guardWarning('VERTICAL', sensorData?.pitch ?? 0, sensorData?.roll ?? 0);
+  const casterWarning = guardWarning('VERTICAL', sensorData?.pitch ?? 0, sensorData?.roll ?? 0, sensorData?.gravityY, sensorData?.gravityZ);
   const casterCanRecord = (sensorData?.isStable ?? false) && casterWarning === null;
 
   if (!sensorData) {
@@ -152,10 +166,10 @@ export function Measure() {
       const isFirstRearCamber = rlBaseline?.roll == null;
       const camber = isFirstRearCamber
         ? 0
-        : calculateCamber(sensorData.roll, rlBaseline!.roll!) * sideSign;
+        : calculateCamber(verticalCamber, rlBaseline!.roll!) * sideSign;
 
       if (isFirstRearCamber) {
-        setRLBaselineRoll(sensorData.roll);
+        setRLBaselineRoll(verticalCamber);
         if (referenceWheel === null) setReferenceWheel(selectedWheel as 'RL' | 'RR');
       }
 
@@ -239,7 +253,7 @@ export function Measure() {
 
     const casterIsRight = casterActiveWheel === 'FR';
     const casterSign = (casterIsRight === refIsRight) ? 1 : -1;
-    const camber = calculateCamber(sensorData.roll, rlBaseline.roll) * casterSign;
+    const camber = calculateCamber(verticalCamber, rlBaseline.roll) * casterSign;
 
     recordCasterReading(casterActiveWheel, casterSteering, camber);
     const nextCasterRecorded = { ...casterRecorded, [`${casterActiveWheel}_${casterSteering}`]: true };
@@ -282,9 +296,9 @@ export function Measure() {
     selectedPosition === 'VERTICAL' ? 'Vertical — Camber' : 'Horizontal — Toe';
   const positionInstructions =
     selectedPosition === 'VERTICAL'
-      ? 'Hold phone UPRIGHT against the wheel face — charging port pointing DOWN, back of phone flat on wheel, screen toward you'
+      ? 'Hold phone UPRIGHT with its edge against the wheel face — charging port DOWN, screen toward rear of car'
       : 'Hold phone FLAT — back facing the ground, screen facing up. Keep it level';
-  const angleLabel = selectedPosition === 'HORIZONTAL' ? 'Toe (Yaw)' : 'Camber (Roll)';
+  const angleLabel = selectedPosition === 'HORIZONTAL' ? 'Toe (Yaw)' : 'Camber';
 
   const casterPrereqsMet = rlBaseline?.roll != null;
   const casterSectionActive = casterSteering !== null && casterActiveWheel !== null;
@@ -422,14 +436,15 @@ export function Measure() {
               pitch={sensorData.pitch}
               roll={sensorData.roll}
               yaw={sensorData.yaw}
+              camber={verticalCamber}
               isStable={sensorData.isStable}
               stabilityProgress={sensorData.stabilityProgress}
               showLabel={angleLabel}
             />
 
-            {warning && (
+            {warningEdgeAware && (
               <div className="bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg px-4 py-3">
-                ⚠️ {warning}
+                ⚠️ {warningEdgeAware}
               </div>
             )}
 
@@ -537,7 +552,7 @@ export function Measure() {
               {casterSectionActive && (
                 <>
                   <p className="text-xs text-neutral-600">
-                    Phone VERTICAL against {WHEEL_LABELS[casterActiveWheel!]} — charging port down, back to wheel.
+                    Phone VERTICAL with edge against {WHEEL_LABELS[casterActiveWheel!]} — charging port down, screen to rear.
                     Steering held at {casterSteering === 'left' ? 'LEFT' : 'RIGHT'} ~20°.
                   </p>
 
@@ -545,9 +560,10 @@ export function Measure() {
                     pitch={sensorData.pitch}
                     roll={sensorData.roll}
                     yaw={sensorData.yaw}
+                    camber={verticalCamber}
                     isStable={sensorData.isStable}
                     stabilityProgress={sensorData.stabilityProgress}
-                    showLabel="Camber (Roll)"
+                    showLabel="Camber"
                   />
 
                   {casterWarning && (
