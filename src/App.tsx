@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ToastProvider } from './hooks/useToast';
 import { SensorControllerProvider } from './hooks/useSensorController';
 import { ToastContainer } from './components/ToastContainer';
@@ -8,10 +8,8 @@ import { Measure } from './pages/Measure';
 import { Results } from './pages/Results';
 
 function App() {
-  const baseUrl = (import.meta as ImportMeta & { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/';
-
   return (
-    <Router basename={baseUrl} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ToastProvider>
         <SensorControllerProvider>
           {/* Global GitHub Link */}
