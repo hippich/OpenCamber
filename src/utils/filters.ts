@@ -14,6 +14,30 @@ export function lowPassFilter(rawValue: number, previousFiltered: number): numbe
 }
 
 /**
+ * Apply low-pass filter to a circular angle (0-360 degrees)
+ * Prevents artificial jumps when crossing the 0/360 boundary.
+ */
+export function circularLowPassFilter(rawValue: number, previousFiltered: number): number {
+  let diff = rawValue - previousFiltered;
+  
+  // Normalize difference to be within -180 and 180
+  diff = ((diff + 180) % 360) - 180;
+  if (diff < -180) {
+    diff += 360;
+  }
+  
+  let filtered = previousFiltered + FILTER_ALPHA * diff;
+  
+  // Normalize result to be within 0 and 360
+  filtered = filtered % 360;
+  if (filtered < 0) {
+    filtered += 360;
+  }
+  
+  return filtered;
+}
+
+/**
  * Calculate variance of angles in a rolling window
  */
 export function calculateVariance(values: number[]): number {

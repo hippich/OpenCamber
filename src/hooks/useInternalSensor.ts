@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useAlignmentStore } from '../store/alignmentStore';
-import { lowPassFilter, isStable, getStabilityProgress } from '../utils/filters';
+import { lowPassFilter, circularLowPassFilter, isStable, getStabilityProgress } from '../utils/filters';
 import { SENSOR_INTERVAL_MS } from '../utils/constants';
 
 interface FilteredAngles {
@@ -60,7 +60,7 @@ export function useInternalSensor(): { requestIOSPermission: () => Promise<boole
         ...filteredAngles.current,
         pitch: lowPassFilter(rawPitch, filteredAngles.current.pitch),
         roll: lowPassFilter(rawRoll, filteredAngles.current.roll),
-        yaw: lowPassFilter(rawYaw, filteredAngles.current.yaw),
+        yaw: circularLowPassFilter(rawYaw, filteredAngles.current.yaw),
       };
       hasFirstReadingRef.current = true;
       freshSampleRef.current = true;  // signal ticker that a valid sample arrived
