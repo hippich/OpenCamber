@@ -24,7 +24,7 @@ const WHEELS: WheelKey[] = ['FL', 'FR', 'RL', 'RR'];
  *
  * HORIZONTAL (toe): phone flat, back to ground, screen up.
  *   - roll = beta-90 ≈ -90 when flat.     Deviation from flat = roll+90 = beta.
- *   - pitch = gamma.                       Guard: |pitch| > 20 (front/back tilt)
+ *   - pitch = gamma.                       Guard: |pitch| > 2 (front/back tilt)
  */
 function guardWarning(
   position: 'VERTICAL' | 'HORIZONTAL' | null,
@@ -36,17 +36,17 @@ function guardWarning(
   if (!position) return null;
   if (position === 'VERTICAL') {
     if (gravityY != null && gravityZ != null) {
-      if (Math.abs(gravityY) < 6) return 'Phone not upright enough — keep charging port down and phone vertical';
-      if (Math.abs(gravityZ) > 3) return 'Phone pitched fore/aft too much — keep edge square to the wheel face';
+      if (Math.abs(gravityY) < 9.4) return 'Phone not upright enough — keep charging port down and phone vertical';
+      if (Math.abs(gravityZ) > 0.34) return 'Phone pitched fore/aft too much — keep edge square to the wheel face';
     } else {
-      if (Math.abs(pitch) > 20) return `Phone tilted sideways ${pitch.toFixed(0)}° — straighten it (charging port straight down)`;
-      if (Math.abs(roll) > 45) return `Phone nearly horizontal (roll ${roll.toFixed(0)}°) — hold it UPRIGHT against the wheel`;
+      if (Math.abs(pitch) > 15) return `Phone tilted sideways ${pitch.toFixed(0)}° — straighten it (charging port straight down)`;
+      if (Math.abs(roll) > 2) return `Phone not flush with wheel (roll ${roll.toFixed(0)}°) — hold it flat against the wheel`;
     }
   } else {
     // HORIZONTAL: deviation from flat = roll + 90 (= beta)
     const flatDeviation = roll + 90;
-    if (Math.abs(pitch) > 20) return `Phone tilted sideways ${pitch.toFixed(0)}° — keep it level`;
-    if (Math.abs(flatDeviation) > 20) return `Phone not flat (${flatDeviation.toFixed(0)}° off) — lay it flat, back facing ground`;
+    if (Math.abs(pitch) > 2) return `Phone tilted sideways ${pitch.toFixed(0)}° — keep it level`;
+    if (Math.abs(flatDeviation) > 2) return `Phone not flat (${flatDeviation.toFixed(0)}° off) — lay it flat, back facing ground`;
   }
   return null;
 }

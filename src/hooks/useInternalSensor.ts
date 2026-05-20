@@ -54,14 +54,36 @@ export function useInternalSensor(): { requestIOSPermission: () => Promise<boole
 
       const rawPitch = event.gamma ?? 0;
       const rawRoll = (event.beta ?? 90) - 90;
-      const rawYaw = event.alpha ?? 0;
+      
+      let rawYaw = event.alpha ?? 0;
+      
+      // webkitCompassHeading is clockwise, W3C alpha is counter-clockwise.
+      if (isIOSDevice && (event as any).webkitCompassHeading !== undefined) {
+          rawYaw = 360 - (event as any).webkitCompassHeading;
+      }
 
-      filteredAngles.current = {
-        ...filteredAngles.current,
-        pitch: lowPassFilter(rawPitch, filteredAngles.current.pitch),
-        roll: lowPassFilter(rawRoll, filteredAngles.current.roll),
-        yaw: circularLowPassFilter(rawYaw, filteredAngles.current.yaw),
-      };
+      const gy = filteredAngles.current.gravityY;
+      const gz = filteredAngles.current.gravityZ;
+      const isHorizontal = Math.abs(rawRoll + 90) <= 30 && Math.abs(rawPitch) <= 30;
+      const isVertical = Math.abs(gy) >= 7.0 && Math.abs(gz) <= 3.0;
+      const inValidPose = isHorizontal || isVertical;
+
+      if (!inValidPose) {
+        filteredAngles.current = {
+          ...filteredAngles.current,
+          pitch: rawPitch,
+          roll: rawRoll,
+          yaw: rawYaw,
+        };
+        angleHistory.current = [];
+      } else {
+        filteredAngles.current = {
+          ...filteredAngles.current,
+          pitch: lowPassFilter(rawPitch, filteredAngles.current.pitch),
+          roll: lowPassFilter(rawRoll, filteredAngles.current.roll),
+          yaw: circularLowPassFilter(rawYaw, filteredAngles.current.yaw),
+        };
+      }
       hasFirstReadingRef.current = true;
       freshSampleRef.current = true;  // signal ticker that a valid sample arrived
   }, []);
@@ -82,25 +104,44 @@ export function useInternalSensor(): { requestIOSPermission: () => Promise<boole
     const gz = accel.z ?? filteredAngles.current.gravityZ;
 
     const rawCamber = (Math.atan2(gx, gy) * 180) / Math.PI;
-    const lowPassedCamber =
-      (1 - CAMBER_FILTER_ALPHA) * filteredAngles.current.camber + CAMBER_FILTER_ALPHA * rawCamber;
 
-    camberSmoothingHistory.current.push(lowPassedCamber);
-    if (camberSmoothingHistory.current.length > CAMBER_MOVING_AVERAGE_WINDOW) {
-      camberSmoothingHistory.current.shift();
+    const currentPitch = filteredAngles.current.pitch;
+    const currentRoll = filteredAngles.current.roll;
+    const isHorizontal = Math.abs(currentRoll + 90) <= 30 && Math.abs(currentPitch) <= 30;
+    const isVertical = Math.abs(gy) >= 7.0 && Math.abs(gz) <= 3.0;
+    const inValidPose = isHorizontal || isVertical;
+
+    if (!inValidPose) {
+      filteredAngles.current = {
+        ...filteredAngles.current,
+        camber: rawCamber,
+        gravityX: gx,
+        gravityY: gy,
+        gravityZ: gz,
+      };
+      camberSmoothingHistory.current = [];
+      angleHistory.current = [];
+    } else {
+      const lowPassedCamber =
+        (1 - CAMBER_FILTER_ALPHA) * filteredAngles.current.camber + CAMBER_FILTER_ALPHA * rawCamber;
+
+      camberSmoothingHistory.current.push(lowPassedCamber);
+      if (camberSmoothingHistory.current.length > CAMBER_MOVING_AVERAGE_WINDOW) {
+        camberSmoothingHistory.current.shift();
+      }
+
+      const movingAverageCamber =
+        camberSmoothingHistory.current.reduce((sum, value) => sum + value, 0) /
+        camberSmoothingHistory.current.length;
+
+      filteredAngles.current = {
+        ...filteredAngles.current,
+        camber: movingAverageCamber,
+        gravityX: lowPassFilter(gx, filteredAngles.current.gravityX),
+        gravityY: lowPassFilter(gy, filteredAngles.current.gravityY),
+        gravityZ: lowPassFilter(gz, filteredAngles.current.gravityZ),
+      };
     }
-
-    const movingAverageCamber =
-      camberSmoothingHistory.current.reduce((sum, value) => sum + value, 0) /
-      camberSmoothingHistory.current.length;
-
-    filteredAngles.current = {
-      ...filteredAngles.current,
-      camber: movingAverageCamber,
-      gravityX: lowPassFilter(gx, filteredAngles.current.gravityX),
-      gravityY: lowPassFilter(gy, filteredAngles.current.gravityY),
-      gravityZ: lowPassFilter(gz, filteredAngles.current.gravityZ),
-    };
 
     hasFirstReadingRef.current = true;
     freshSampleRef.current = true;
@@ -124,7 +165,7 @@ export function useInternalSensor(): { requestIOSPermission: () => Promise<boole
       // Posture-aware stabilization source:
       // - Horizontal phone (toe capture): use roll (flatness) to avoid noisy camber projection
       // - Vertical phone (camber/caster): use gravity-derived camber
-      const isHorizontalPose = Math.abs(roll + 90) <= 20 && Math.abs(pitch) <= 20;
+      const isHorizontalPose = Math.abs(roll + 90) <= 2 && Math.abs(pitch) <= 2;
       const stabilitySample = isHorizontalPose ? roll : camber;
 
       angleHistory.current.push(stabilitySample);
